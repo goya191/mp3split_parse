@@ -46,6 +46,7 @@ http://manual.audacityteam.org/man/importing_and_exporting_labels.html
 """
 import sys, os
 import datetime
+import re
 
 OVERWRITE_OUT_FILE = True
 
@@ -53,13 +54,44 @@ OVERWRITE_OUT_FILE = True
 #
 # helper functions
 #
-def parse_track_time(time_str):
+
+def parse_hh_mm_ss(time_str):
 	"""
-	accepts a: time in "HH:MM:SS" format
+	parses time string in:
+	HH:MM:SS format
 	returns total seconds
 	"""
+	total_seconds = 0
 	h, m, s = time_str.split(':')
-	return int(h) * 3600 + int(m) * 60 + int(s)
+	total_seconds += int(h) * 3600
+	total_seconds += int(m) * 60
+	total_seconds += int(s)
+	return total_seconds
+
+def parse_mm_ss(time_str):
+	"""
+	Parses string in:
+	"MM:SS" format
+	returns total seconds
+	"""
+	total_seconds = 0
+	m, s = time_str.split(':')
+	total_seconds += 60 * int(m)
+	total_seconds += int(s[:2])
+	return total_seconds
+
+def parse_track_time(time_str):
+	"""
+	figures out format from line length
+	calls correct parsing function based on format
+	returns total seconds
+	"""
+	if len(time_str) == 5:
+		return parse_mm_ss(time_str)
+	elif len(time_str) == 8:
+		return parse_hh_mm_ss(time_str)
+	else:
+		return VauleError("invalid time string {}".format(time_str))
 
 
 #
@@ -81,15 +113,27 @@ def generate_audacity_file(in_file_path, out_file_path):
 	track_name = None
 	
 	with open(in_file_path, 'r') as in_file, open(out_file_path, 'w') as out_file:
-		for idx, line in enumerate(in_file):
-			#first 8 are time, ex: 04:02:21
-			track_time = line[:8]
-			# 10 - EOL is track name, ex: Above & Beyon - Counting Down The Days (Faux Tales Remix)
-			last_track_name = track_name
-			track_name = line[9:].strip(' ').strip('\n')
+		for line in in_file:
+
+			track_time_str = ""
 			
+			num_sep = len(re.findall(':', line[:8]))
+			#either first 8 or 5 characters are time, 
+			# ex: 04:02:21, 02:21
+			if num_sep == 2:
+				track_time_str = line[:8]
+				last_track_name = track_name
+				track_name = line[9:].strip(' ').strip('\n')
+			elif num_sep == 1:
+				track_time_str = line[:5]
+				last_track_name = track_name
+				track_name = line[6:].strip(' ').strip('\n')
+
+			else:
+				raise VauleError("invalid  time format: {}".format(line))
+			# 10 - EOL is track name, ex: Above & Beyon - Counting Down The Days (Faux Tales Remix)
 			last_track_start_time = track_start_time
-			track_start_time = parse_track_time(track_time)
+			track_start_time = parse_track_time(track_time_str)
 			
 			if last_track_start_time is not None:
 				# current start time is the last track's end time
@@ -129,7 +173,8 @@ if __name__ == "__main__":
 	in_file_path = sys.argv[1]
 
 	if len(sys.argv) == 2:
-		out_file_path = sys.argv[1] + ".txt"
+		# use <infile>.out as default outfile name if not specified
+		out_file_path = sys.argv[1] + "out.txt"
 	else:
 		out_file_path = sys.argv[2]
 		# XXX Hack
